@@ -1,0 +1,64 @@
+class Library:
+    def __init__(self):
+        self.books = ["1984", "To Kill a Mockingbird", "The Great Gatsby"]
+
+    def display_books(self):
+        if not self.books:
+            print("\nNo books currently available.")
+            return
+        print("\nAvailable Books:")
+        for idx, book in enumerate(self.books, 1):
+            print(f"{idx}. {book}")
+
+    def add_book(self, book_name):
+        self.books.append(book_name)
+        print(f"\n'{book_name}' added to the library.")
+
+    def borrow_book(self, book_name):
+        if book_name in self.books:
+            self.books.remove(book_name)
+            print(f"\nYou borrowed '{book_name}'.")
+        else:
+            print(f"\nSorry, '{book_name}' is not in stock.")
+
+    def return_book(self, book_name):
+        self.books.append(book_name)
+        print(f"\nThank you for returning '{book_name}'.")
+
+
+def main():
+    lib = Library()
+    
+    while True:
+        print("\n--- Library Menu ---")
+        print("1. View Available Books")
+        print("2. Add a Book")
+        print("3. Borrow a Book")
+        print("4. Return a Book")
+        print("5. Exit")
+        
+        choice = input("\nChoose an option (1-5): ").strip()
+
+        if choice == "1":
+            lib.display_books()
+        elif choice == "2":
+            title = input("Enter book title: ").strip()
+            if title:
+                lib.add_book(title)
+        elif choice == "3":
+            title = input("Enter book title to borrow: ").strip()
+            if title:
+                lib.borrow_book(title)
+        elif choice == "4":
+            title = input("Enter book title to return: ").strip()
+            if title:
+                lib.return_book(title)
+        elif choice == "5":
+            print("\nGoodbye!")
+            break
+        else:
+            print("\nInvalid choice. Please pick between 1 and 5.")
+
+
+if __name__ == "__main__":
+    main()
