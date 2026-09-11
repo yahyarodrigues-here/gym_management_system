@@ -1,63 +1,126 @@
+import json
+import os
+
 class Library:
-    def __init__(self):
-        self.books = ["1984", "To Kill a Mockingbird", "The Great Gatsby"]
+    def __init__(self, filename="library.json"):
+        self.filename = filename
+        self.books = self.load_data()
+
+    def load_data(self):
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, "r") as file:
+                    return json.load(file)
+            except json.JSONDecodeError:
+                return []
+        # Default seed data if file doesn't exist
+        return [
+            {"title": "1984", "author": "George Orwell", "available": True},
+            {"title": "To Kill a Mockingbird", "author": "Harper Lee", "available": True},
+            {"title": "The Great Gatsby", "author": "F. Scott Fitzgerald", "available": True}
+        ]
+
+    def save_data(self):
+        with open(self.filename, "w") as file:
+            json.dump(self.books, file, indent=4)
 
     def display_books(self):
         if not self.books:
-            print("\nNo books currently available.")
+            print("\nNo books found in the library database.")
             return
-        print("\nAvailable Books:")
-        for idx, book in enumerate(self.books, 1):
-            print(f"{idx}. {book}")
+        print("\n" + "=" * 55)
+        print(f"{'Title':<25} | {'Author':<20} | Status")
+        print("=" * 55)
+        for book in self.books:
+            status = "Available" if book["available"] else "Borrowed"
+            print(f"{book['title']:<25} | {book['author']:<20} | {status}")
+        print("=" * 55)
 
-    def add_book(self, book_name):
-        self.books.append(book_name)
-        print(f"\n'{book_name}' added to the library.")
+    def search_book(self, query):
+        results = [
+            b for b in self.books 
+            if query.lower() in b['title'].lower() or query.lower() in b['author'].lower()
+        ]
+        if not results:
+            print(f"\nNo matches found for '{query}'.")
+            return
+        print(f"\nMatches for '{query}':")
+        for book in results:
+            status = "Available" if book["available"] else "Borrowed"
+            print(f"- {book['title']} by {book['author']} [{status}]")
 
-    def borrow_book(self, book_name):
-        if book_name in self.books:
-            self.books.remove(book_name)
-            print(f"\nYou borrowed '{book_name}'.")
-        else:
-            print(f"\nSorry, '{book_name}' is not in stock.")
+    def add_book(self, title, author):
+        self.books.append({"title": title, "author": author, "available": True})
+        self.save_data()
+        print(f"\nSuccess: '{title}' by {author} added.")
 
-    def return_book(self, book_name):
-        self.books.append(book_name)
-        print(f"\nThank you for returning '{book_name}'.")
+    def borrow_book(self, title):
+        for book in self.books:
+            if book["title"].lower() == title.lower():
+                if book["available"]:
+                    book["available"] = False
+                    self.save_data()
+                    print(f"\nSuccess: You borrowed '{book['title']}'.")
+                    return
+                else:
+                    print(f"\nNotice: '{book['title']}' is currently borrowed.")
+                    return
+        print(f"\nError: '{title}' was not found in the library.")
+
+    def return_book(self, title):
+        for book in self.books:
+            if book["title"].lower() == title.lower():
+                if not book["available"]:
+                    book["available"] = True
+                    self.save_data()
+                    print(f"\nSuccess: Thank you for returning '{book['title']}'.")
+                    return
+                else:
+                    print(f"\nNotice: '{book['title']}' was not marked as borrowed.")
+                    return
+        print(f"\nError: '{title}' does not belong to this library.")
 
 
 def main():
     lib = Library()
-    
+
     while True:
-        print("\n--- Library Menu ---")
-        print("1. View Available Books")
-        print("2. Add a Book")
-        print("3. Borrow a Book")
-        print("4. Return a Book")
-        print("5. Exit")
-        
-        choice = input("\nChoose an option (1-5): ").strip()
+        print("\n=== Library System ===")
+        print("1. View All Books")
+        print("2. Search for a Book")
+        print("3. Add a Book")
+        print("4. Borrow a Book")
+        print("5. Return a Book")
+        print("6. Exit")
+
+        choice = input("\nChoose an option (1-6): ").strip()
 
         if choice == "1":
             lib.display_books()
         elif choice == "2":
-            title = input("Enter book title: ").strip()
-            if title:
-                lib.add_book(title)
+            query = input("Enter title or author search term: ").strip()
+            if query:
+                lib.search_book(query)
         elif choice == "3":
-            title = input("Enter book title to borrow: ").strip()
+            title = input("Enter book title: ").strip()
+            author = input("Enter author name: ").strip()
+            if title and author:
+                lib.add_book(title, author)
+            else:
+                print("\nError: Title and author cannot be empty.")
+        elif choice == "4":
+            title = input("Enter title to borrow: ").strip()
             if title:
                 lib.borrow_book(title)
-        elif choice == "4":
-            title = input("Enter book title to return: ").strip()
+        elif choice == "5":
+            title = input("Enter title to return: ").strip()
             if title:
                 lib.return_book(title)
-        elif choice == "5":
+        elif choice == "6":
             print("\nGoodbye!")
             break
         else:
-            print("\nInvalid choice. Please pick between 1 and 5.")
+            print("\nInvalid choice. Please select 1-6.")
 
 
 if __name__ == "__main__":
