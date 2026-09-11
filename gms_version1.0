@@ -1,126 +1,208 @@
-import json
-import os
+import sqlite3
+from datetime import datetime
 
-class Library:
-    def __init__(self, filename="library.json"):
-        self.filename = filename
-        self.books = self.load_data()
+class LibrarySystem:
+    def __init__(self, db_name="library.db"):
+        self.conn = sqlite3.connect(db_name)
+        self.cursor = self.conn.cursor()
+        self.setup_database()
+        self.current_user = None
 
-    def load_data(self):
-        if os.path.exists(self.filename):
-            try:
-                with open(self.filename, "r") as file:
-                    return json.load(file)
-            except json.JSONDecodeError:
-                return []
-        # Default seed data if file doesn't exist
-        return [
-            {"title": "1984", "author": "George Orwell", "available": True},
-            {"title": "To Kill a Mockingbird", "author": "Harper Lee", "available": True},
-            {"title": "The Great Gatsby", "author": "F. Scott Fitzgerald", "available": True}
-        ]
+    def setup_database(self):
+        """Creates tables and seeds default data if new."""
+        with self.conn:
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('admin', 'member'))
+                )
+            """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS books (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    author TEXT NOT NULL,
+                    total_copies INTEGER NOT NULL,
+                    available_copies INTEGER NOT NULL
+                )
+            """)
+            self.cursor.execute("""
+                CREATE TABLE IF NOT EXISTS loans (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    book_id INTEGER NOT NULL,
+                    issue_date TEXT NOT NULL,
+                    returned INTEGER DEFAULT 0,
+                    FOREIGN KEY(user_id) REFERENCES users(id),
+                    FOREIGN KEY(book_id) REFERENCES books(id)
+                )
+            """)
 
-    def save_data(self):
-        with open(self.filename, "w") as file:
-            json.dump(self.books, file, indent=4)
+        # Seed default admin and member if table is empty
+        self.cursor.execute("SELECT COUNT(*) FROM users")
+        if self.cursor.fetchone()[0] == 0:
+            with self.conn:
+                self.cursor.execute("INSERT INTO users (username, role) VALUES ('admin', 'admin')")
+                self.cursor.execute("INSERT INTO users (username, role) VALUES ('student', 'member')")
+                self.cursor.executemany("""
+                    INSERT INTO books (title, author, total_copies, available_copies)
+                    VALUES (?, ?, ?, ?)
+                """, [
+                    ("1984", "George Orwell", 3, 3),
+                    ("To Kill a Mockingbird", "Harper Lee", 2, 2),
+                    ("The Great Gatsby", "F. Scott Fitzgerald", 1, 1)
+                ])
+
+    def login(self, username):
+        self.cursor.execute("SELECT id, username, role FROM users WHERE LOWER(username) = LOWER(?)", (username,))
+        user = self.cursor.fetchone()
+        if user:
+            self.current_user = {"id": user[0], "username": user[1], "role": user[2]}
+            print(f"\nLogged in as {user[1]} ({user[2].capitalize()})")
+            return True
+        print("\nUser not found.")
+        return False
 
     def display_books(self):
-        if not self.books:
-            print("\nNo books found in the library database.")
+        self.cursor.execute("SELECT id, title, author, available_copies, total_copies FROM books")
+        books = self.cursor.fetchall()
+        print("\n" + "=" * 65)
+        print(f"{'ID':<4} | {'Title':<25} | {'Author':<20} | Stock")
+        print("=" * 65)
+        for b in books:
+            print(f"{b[0]:<4} | {b[1]:<25} | {b[2]:<20} | {b[3]}/{b[4]}")
+        print("=" * 65)
+
+    def borrow_book(self, book_id):
+        self.cursor.execute("SELECT available_copies, title FROM books WHERE id = ?", (book_id,))
+        book = self.cursor.fetchone()
+        
+        if not book:
+            print("\nInvalid Book ID.")
             return
-        print("\n" + "=" * 55)
-        print(f"{'Title':<25} | {'Author':<20} | Status")
-        print("=" * 55)
-        for book in self.books:
-            status = "Available" if book["available"] else "Borrowed"
-            print(f"{book['title']:<25} | {book['author']:<20} | {status}")
-        print("=" * 55)
-
-    def search_book(self, query):
-        results = [
-            b for b in self.books 
-            if query.lower() in b['title'].lower() or query.lower() in b['author'].lower()
-        ]
-        if not results:
-            print(f"\nNo matches found for '{query}'.")
+        if book[0] <= 0:
+            print(f"\nSorry, '{book[1]}' is currently out of stock.")
             return
-        print(f"\nMatches for '{query}':")
-        for book in results:
-            status = "Available" if book["available"] else "Borrowed"
-            print(f"- {book['title']} by {book['author']} [{status}]")
 
-    def add_book(self, title, author):
-        self.books.append({"title": title, "author": author, "available": True})
-        self.save_data()
-        print(f"\nSuccess: '{title}' by {author} added.")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        with self.conn:
+            self.cursor.execute("UPDATE books SET available_copies = available_copies - 1 WHERE id = ?", (book_id,))
+            self.cursor.execute("INSERT INTO loans (user_id, book_id, issue_date) VALUES (?, ?, ?)",
+                                (self.current_user["id"], book_id, now))
+        print(f"\nSuccess: You borrowed '{book[1]}'.")
 
-    def borrow_book(self, title):
-        for book in self.books:
-            if book["title"].lower() == title.lower():
-                if book["available"]:
-                    book["available"] = False
-                    self.save_data()
-                    print(f"\nSuccess: You borrowed '{book['title']}'.")
-                    return
-                else:
-                    print(f"\nNotice: '{book['title']}' is currently borrowed.")
-                    return
-        print(f"\nError: '{title}' was not found in the library.")
+    def return_book(self, book_id):
+        self.cursor.execute("""
+            SELECT id FROM loans 
+            WHERE user_id = ? AND book_id = ? AND returned = 0
+        """, (self.current_user["id"], book_id))
+        loan = self.cursor.fetchone()
 
-    def return_book(self, title):
-        for book in self.books:
-            if book["title"].lower() == title.lower():
-                if not book["available"]:
-                    book["available"] = True
-                    self.save_data()
-                    print(f"\nSuccess: Thank you for returning '{book['title']}'.")
-                    return
-                else:
-                    print(f"\nNotice: '{book['title']}' was not marked as borrowed.")
-                    return
-        print(f"\nError: '{title}' does not belong to this library.")
+        if not loan:
+            print("\nNo active record found for this book under your account.")
+            return
+
+        with self.conn:
+            self.cursor.execute("UPDATE loans SET returned = 1 WHERE id = ?", (loan[0],))
+            self.cursor.execute("UPDATE books SET available_copies = available_copies + 1 WHERE id = ?", (book_id,))
+        print("\nSuccess: Book returned successfully.")
+
+    def view_my_loans(self):
+        self.cursor.execute("""
+            SELECT b.title, l.issue_date 
+            FROM loans l 
+            JOIN books b ON l.book_id = b.id 
+            WHERE l.user_id = ? AND l.returned = 0
+        """, (self.current_user["id"],))
+        loans = self.cursor.fetchall()
+        print(f"\n--- Active Borrowed Books for {self.current_user['username']} ---")
+        if not loans:
+            print("No active loans.")
+            return
+        for book_title, issue_date in loans:
+            print(f"- {book_title} (Borrowed on: {issue_date})")
+
+    # --- Admin Functions ---
+    def add_book(self, title, author, copies):
+        with self.conn:
+            self.cursor.execute("""
+                INSERT INTO books (title, author, total_copies, available_copies)
+                VALUES (?, ?, ?, ?)
+            """, (title, author, copies, copies))
+        print(f"\nAdmin Action: Added '{title}' with {copies} copies.")
+
+    def register_user(self, username, role):
+        try:
+            with self.conn:
+                self.cursor.execute("INSERT INTO users (username, role) VALUES (?, ?)", (username, role))
+            print(f"\nAdmin Action: Created user '{username}' as {role}.")
+        except sqlite3.IntegrityError:
+            print("\nError: Username already exists.")
 
 
 def main():
-    lib = Library()
-
+    system = LibrarySystem()
+    
+    print("=== Welcome to the Enterprise Library System ===")
+    print("Default accounts created: 'admin' (Admin), 'student' (Member)")
+    
     while True:
-        print("\n=== Library System ===")
-        print("1. View All Books")
-        print("2. Search for a Book")
-        print("3. Add a Book")
-        print("4. Borrow a Book")
-        print("5. Return a Book")
-        print("6. Exit")
+        if not system.current_user:
+            user_input = input("\nEnter username to login (or type 'exit'): ").strip()
+            if user_input.lower() == 'exit':
+                break
+            system.login(user_input)
+            continue
 
-        choice = input("\nChoose an option (1-6): ").strip()
+        role = system.current_user["role"]
+        print(f"\n--- Main Menu [{system.current_user['username'].upper()}] ---")
+        print("1. View Book Catalog")
+        print("2. Borrow a Book")
+        print("3. Return a Book")
+        print("4. View My Borrowed Books")
+        
+        if role == "admin":
+            print("5. [Admin] Add New Book Stock")
+            print("6. [Admin] Register New User")
+            
+        print("7. Logout")
+
+        choice = input("\nSelect option: ").strip()
 
         if choice == "1":
-            lib.display_books()
+            system.display_books()
         elif choice == "2":
-            query = input("Enter title or author search term: ").strip()
-            if query:
-                lib.search_book(query)
+            try:
+                b_id = int(input("Enter Book ID to borrow: "))
+                system.borrow_book(b_id)
+            except ValueError:
+                print("\nPlease enter a valid integer ID.")
         elif choice == "3":
-            title = input("Enter book title: ").strip()
-            author = input("Enter author name: ").strip()
-            if title and author:
-                lib.add_book(title, author)
-            else:
-                print("\nError: Title and author cannot be empty.")
+            try:
+                b_id = int(input("Enter Book ID to return: "))
+                system.return_book(b_id)
+            except ValueError:
+                print("\nPlease enter a valid integer ID.")
         elif choice == "4":
-            title = input("Enter title to borrow: ").strip()
-            if title:
-                lib.borrow_book(title)
-        elif choice == "5":
-            title = input("Enter title to return: ").strip()
-            if title:
-                lib.return_book(title)
-        elif choice == "6":
-            print("\nGoodbye!")
-            break
-        else:
-            print("\nInvalid choice. Please select 1-6.")
+            system.view_my_loans()
+        elif choice == "5" and role == "admin":
+            t = input("Title: ").strip()
+            a = input("Author: ").strip()
+            try:
+                c = int(input("Copy Count: "))
+                if t and a and c > 0:
+                    system.add_book(t, a, c)
+            except ValueError:
+                print("\nInvalid count.")
+        elif choice == "6" and role == "admin":
+            u = input("New Username: ").strip()
+            r = input("Role (admin/member): ").strip().lower()
+            if u and r in ['admin', 'member']:
+                system.register_user(u, r)
+        elif choice == "7":
+            system.current_user = None
+            print("\nLogged out successfully.")
 
 
 if __name__ == "__main__":
